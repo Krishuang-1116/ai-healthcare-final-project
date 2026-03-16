@@ -127,9 +127,9 @@ def fit_predict_ebm(X_train, y_train, X_test):
     model = ExplainableBoostingClassifier(random_state=RANDOM_STATE)
 
     param_grid = {
-        "max_leaves": [2],
-        "interactions": ["3x"],
-        "learning_rate": [0.01]
+        "max_leaves": [2, 3],
+        "interactions": ["3x", "4x"],
+        "learning_rate": [0.005, 0.01],
     }
 
     inner_cv = StratifiedKFold(
