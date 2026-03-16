@@ -49,7 +49,7 @@ class MLPClassifierWrapper:
             dropout=dropout
         ).to(self.device)
 
-        self.loss_fn = nn.BCEWithLogitsLoss()
+        self.loss_fn = nn.BCEWithLogitsLoss()  # Binary Cross-Entropy with Logits
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
     def fit(self, X_train, y_train):
@@ -134,3 +134,11 @@ class MLPClassifierWrapper:
         for key, value in params.items():
             setattr(self, key, value)
         return self
+
+
+def fit_predict_mlp(X_train, y_train, X_test):
+    input_dim = X_train.shape[1]
+    model = MLPClassifierWrapper(input_dim=input_dim)
+    model.fit(X_train, y_train)
+    y_prob = model.predict_proba(X_test)[:, 1]
+    return y_prob
