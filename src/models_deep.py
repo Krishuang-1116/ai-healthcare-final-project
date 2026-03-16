@@ -58,6 +58,10 @@ class MLPClassifierWrapper:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
     def fit(self, X_train, y_train):
+        # Debug
+        print("Inside .fit() X_train NaNs:", np.isnan(X_train).sum())
+        print("Inside .fit() X_train shape:", X_train.shape)
+
         torch.manual_seed(self.random_state)
         np.random.seed(self.random_state)
 
@@ -200,6 +204,14 @@ def fit_predict_mlp(X_train, y_train, X_test):
 
     input_dim = X_train_scaled.shape[1]
     model = MLPClassifierWrapper(input_dim=input_dim)
+
+    # Debug
+    print("Before model.fit")
+    print("X_train_scaled NaNs:", np.isnan(X_train_scaled).sum())
+    print("X_test_scaled NaNs:", np.isnan(X_test_scaled).sum())
+    print("X_train_scaled shape:", X_train_scaled.shape)
+    print("About to pass into model.fit:", "X_train_scaled")
+
     model.fit(X_train_scaled, y_train)
     y_prob = model.predict_proba(X_test_scaled)[:, 1]
     return y_prob
