@@ -64,6 +64,10 @@ class MLPClassifierWrapper:
         X_train = np.asarray(X_train, dtype=np.float32)
         y_train = np.asarray(y_train, dtype=np.float32).reshape(-1, 1)
 
+        print("unique_y:", np.unique(y_train))
+        assert np.isfinite(X_train).all(), "X_train contains non-finite values"
+        assert np.isfinite(y_train).all(), "y_train contains non-finite values"
+
         dataset = TensorDataset(
             torch.tensor(X_train),
             torch.tensor(y_train)
@@ -72,18 +76,40 @@ class MLPClassifierWrapper:
 
         self.model.train()
         for _ in range(self.epochs):
-            for xb, yb in loader:
+            for batch_idx, (xb, yb) in enumerate(loader):
                 xb = xb.to(self.device)
                 yb = yb.to(self.device)
 
+                # Check for NaN values in the batch during training
+                if torch.isnan(xb).any():
+                    raise ValueError(
+                        f"NaN found in xb at epoch {_}, batch {batch_idx} during MLP training.")
+                if torch.isnan(yb).any():
+                    raise ValueError(
+                        f"NaN found in yb at epoch {_}, batch {batch_idx} during MLP training.")
+
                 self.optimizer.zero_grad()
                 logits = self.model(xb)
+
+                # Check for NaN values in logits during training
+                if torch.isnan(logits).any():
+                    print("epoch:", _, "batch:", batch_idx)
+                    print("xb min/max:", xb.min().item(), xb.max().item())
+                    print("yb unique:", torch.unique(yb))
+                    raise ValueError(
+                        f"NaN logits at epoch {_}, batch {batch_idx}")
+
                 loss = self.loss_fn(logits, yb)
 
-                # Check for NaN loss during training
+                # Check for NaN values in loss during training
                 if torch.isnan(loss):
+                    print("epoch:", _, "batch:", batch_idx)
+                    print("xb min/max:", xb.min().item(), xb.max().item())
+                    print("logits min/max:", logits.min().item(),
+                          logits.max().item())
+                    print("yb unique:", torch.unique(yb))
                     raise ValueError(
-                        "NaN loss encountered during MLP training.")
+                        f"NaN loss encountered during MLP training at epoch {_}, batch {batch_idx}")
 
                 loss.backward()
                 # add gradient clipping to prevent exploding gradients
