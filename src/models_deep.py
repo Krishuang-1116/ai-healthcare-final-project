@@ -5,8 +5,11 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import GridSearchCV, StratifiedKFold
 
 from src.config import RANDOM_STATE
 from src.models_classical import build_missingness_indicator
@@ -26,7 +29,7 @@ class SimpleMLP(nn.Module):
         return self.net(x)
 
 
-class MLPClassifierWrapper:
+class MLPClassifierWrapper(BaseEstimator, ClassifierMixin):
     def __init__(
         self,
         input_dim,
@@ -45,31 +48,31 @@ class MLPClassifierWrapper:
         self.batch_size = batch_size
         self.epochs = epochs
         self.random_state = random_state
-        self.device = device or (
+        self.device = device
+
+    def _build_model(self):
+        self.device_ = self.device or (
             "cuda" if torch.cuda.is_available() else "cpu")
+        self.model_ = SimpleMLP(
+            input_dim=self.input_dim,
+            hidden_dim=self.hidden_dim,
+            dropout=self.dropout
+        ).to(self.device_)
 
-        self.model = SimpleMLP(
-            input_dim=input_dim,
-            hidden_dim=hidden_dim,
-            dropout=dropout
-        ).to(self.device)
-
-        self.loss_fn = nn.BCEWithLogitsLoss()  # Binary Cross-Entropy with Logits
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        self.loss_fn_ = nn.BCEWithLogitsLoss()  # Binary Cross-Entropy with Logits
+        self.optimizer_ = torch.optim.Adam(
+            self.model_.parameters(), lr=self.lr)
 
     def fit(self, X_train, y_train):
-        # Debug
-        print("Inside .fit() X_train NaNs:", np.isnan(X_train).sum())
-        print("Inside .fit() X_train shape:", X_train.shape)
-
         torch.manual_seed(self.random_state)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(self.random_state)
         np.random.seed(self.random_state)
 
         X_train = np.asarray(X_train, dtype=np.float32)
         y_train = np.asarray(y_train, dtype=np.float32).reshape(-1, 1)
 
-        print("unique_y:", np.unique(y_train))
-        assert np.isfinite(y_train).all(), "y_train contains non-finite values"
+        self._build_model()
 
         dataset = TensorDataset(
             torch.tensor(X_train),
@@ -77,11 +80,11 @@ class MLPClassifierWrapper:
         )
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
 
-        self.model.train()
+        self.model_.train()
         for _ in range(self.epochs):
             for batch_idx, (xb, yb) in enumerate(loader):
-                xb = xb.to(self.device)
-                yb = yb.to(self.device)
+                xb = xb.to(self.device_)
+                yb = yb.to(self.device_)
 
                 # Check for NaN values in the batch during training
                 if torch.isnan(xb).any():
@@ -91,35 +94,15 @@ class MLPClassifierWrapper:
                     raise ValueError(
                         f"NaN found in yb at epoch {_}, batch {batch_idx} during MLP training.")
 
-                self.optimizer.zero_grad()
-                logits = self.model(xb)
-
-                # Check for NaN values in logits during training
-                if torch.isnan(logits).any():
-                    print("epoch:", _, "batch:", batch_idx)
-                    print("xb min/max:", xb.min().item(), xb.max().item())
-                    print("yb unique:", torch.unique(yb))
-                    raise ValueError(
-                        f"NaN logits at epoch {_}, batch {batch_idx}")
-
-                loss = self.loss_fn(logits, yb)
-
-                # Check for NaN values in loss during training
-                if torch.isnan(loss):
-                    print("epoch:", _, "batch:", batch_idx)
-                    print("xb min/max:", xb.min().item(), xb.max().item())
-                    print("logits min/max:", logits.min().item(),
-                          logits.max().item())
-                    print("yb unique:", torch.unique(yb))
-                    raise ValueError(
-                        f"NaN loss encountered during MLP training at epoch {_}, batch {batch_idx}")
-
+                self.optimizer_.zero_grad()
+                logits = self.model_(xb)
+                loss = self.loss_fn_(logits, yb)
                 loss.backward()
                 # add gradient clipping to prevent exploding gradients
                 torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=1.0)
-                self.optimizer.step()
-
+                    self.model_.parameters(), max_norm=1.0)
+                self.optimizer_.step()
+        self.classes_ = np.array([0, 1])
         return self
 
     def predict_proba(self, X):
@@ -135,31 +118,29 @@ class MLPClassifierWrapper:
             Predicted class probabilities.
         '''
         X = np.asarray(X, dtype=np.float32)
-        X_tensor = torch.tensor(X).to(self.device)
+        X_tensor = torch.tensor(X).to(self.device_)
 
-        self.model.eval()
+        self.model_.eval()
         with torch.no_grad():
-            logits = self.model(X_tensor)
+            logits = self.model_(X_tensor)
             probs = torch.sigmoid(logits).cpu().numpy().flatten()
 
         return np.column_stack([1 - probs, probs])
 
-    def predict(self, X, threshold=0.5):
+    def predict(self, X):
         '''
         Predict class labels for the input samples.
 
         Parameters:
         X : array-like of shape (n_samples, n_features)
             Input samples.
-        threshold : float, default=0.5
-            Threshold for converting predicted probabilities to class labels.
 
         Returns:
         labels : array-like of shape (n_samples,)
             Predicted class labels.
         '''
         probs = self.predict_proba(X)[:, 1]
-        return (probs >= threshold).astype(int)
+        return (probs >= 0.5).astype(int)
 
     def get_params(self, deep=True):
         return {
@@ -187,31 +168,57 @@ def fit_predict_mlp(X_train, y_train, X_test):
     X_train = build_missingness_indicator(X_train)
     X_test = build_missingness_indicator(X_test)
 
-    # Impute nans and scale features
-    imputer = SimpleImputer(strategy="median")
-    scaler = StandardScaler()
+    # # Impute nans and scale features
+    # imputer = SimpleImputer(strategy="median")
+    # scaler = StandardScaler()
 
-    X_train_imp = imputer.fit_transform(X_train)
-    X_test_imp = imputer.transform(X_test)
+    # X_train_imp = imputer.fit_transform(X_train)
+    # X_test_imp = imputer.transform(X_test)
 
-    X_train_scaled = scaler.fit_transform(X_train_imp)
-    X_test_scaled = scaler.transform(X_test_imp)
+    # X_train_scaled = scaler.fit_transform(X_train_imp)
+    # X_test_scaled = scaler.transform(X_test_imp)
 
-    assert np.isfinite(X_train_scaled).all(
-    ), "X_train_scaled contains non-finite values"
-    assert np.isfinite(X_test_scaled).all(
-    ), "X_test_scaled contains non-finite values"
+    # assert np.isfinite(X_train_scaled).all(
+    # ), "X_train_scaled contains non-finite values"
+    # assert np.isfinite(X_test_scaled).all(
+    # ), "X_test_scaled contains non-finite values"
 
-    input_dim = X_train_scaled.shape[1]
-    model = MLPClassifierWrapper(input_dim=input_dim)
+    input_dim = X_train.shape[1]
+    pipe = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+        ("model", MLPClassifierWrapper(input_dim=input_dim))
+    ])
 
-    # Debug
-    print("Before model.fit")
-    print("X_train_scaled NaNs:", np.isnan(X_train_scaled).sum())
-    print("X_test_scaled NaNs:", np.isnan(X_test_scaled).sum())
-    print("X_train_scaled shape:", X_train_scaled.shape)
-    print("About to pass into model.fit:", "X_train_scaled")
+    param_grid = {
+        'model__hidden_dim': [32, 64],
+        'model__lr': [1e-4, 3e-4],
+        'model__dropout': [0.1, 0.2]
+    }
 
-    model.fit(X_train_scaled, y_train)
-    y_prob = model.predict_proba(X_test_scaled)[:, 1]
-    return y_prob
+    inner_cv = StratifiedKFold(
+        n_splits=3,
+        shuffle=True,
+        random_state=RANDOM_STATE
+    )
+
+    grid_search = GridSearchCV(
+        estimator=pipe,
+        param_grid=param_grid,
+        cv=inner_cv,
+        scoring='roc_auc',
+        refit=True,
+        n_jobs=1
+    )
+
+    # # Debug
+    # print("Before model.fit")
+    # print("X_train_scaled NaNs:", np.isnan(X_train_scaled).sum())
+    # print("X_test_scaled NaNs:", np.isnan(X_test_scaled).sum())
+    # print("X_train_scaled shape:", X_train_scaled.shape)
+    # print("About to pass into model.fit:", "X_train_scaled")
+
+    grid_search.fit(X_train, y_train)
+    y_prob = grid_search.predict_proba(X_test)[:, 1]
+    best_params = grid_search.best_params_
+    return y_prob, best_params
