@@ -11,6 +11,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 
+from tabicl import TabICLClassifier
+
 from src.config import RANDOM_STATE
 from src.models_classical import build_missingness_indicator
 
@@ -222,3 +224,13 @@ def fit_predict_mlp(X_train, y_train, X_test):
     y_prob = grid_search.predict_proba(X_test)[:, 1]
     best_params = grid_search.best_params_
     return y_prob, best_params
+
+
+def fit_predict_tabicl(X_train, y_train, X_test):
+    '''
+    fit a TabICL model and return predicted probabilities for the positive class.
+    '''
+    model = TabICLClassifier()
+    model.fit(X_train, y_train)
+    y_prob = model.predict_proba(X_test)[:, 1]
+    return y_prob
