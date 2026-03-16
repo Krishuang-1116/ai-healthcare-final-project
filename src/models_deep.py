@@ -32,9 +32,9 @@ class MLPClassifierWrapper:
         input_dim,
         hidden_dim=64,
         dropout=0.2,
-        lr=1e-3,
+        lr=1e-4,  # reduced learning rate for better convergence
         batch_size=32,
-        epochs=20,
+        epochs=10,  # reduced epochs to prevent overfitting
         device=None,
         random_state=RANDOM_STATE
     ):
@@ -79,7 +79,16 @@ class MLPClassifierWrapper:
                 self.optimizer.zero_grad()
                 logits = self.model(xb)
                 loss = self.loss_fn(logits, yb)
+
+                # Check for NaN loss during training
+                if torch.isnan(loss):
+                    raise ValueError(
+                        "NaN loss encountered during MLP training.")
+
                 loss.backward()
+                # add gradient clipping to prevent exploding gradients
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
 
         return self
