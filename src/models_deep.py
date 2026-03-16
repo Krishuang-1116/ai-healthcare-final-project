@@ -65,7 +65,6 @@ class MLPClassifierWrapper:
         y_train = np.asarray(y_train, dtype=np.float32).reshape(-1, 1)
 
         print("unique_y:", np.unique(y_train))
-        assert np.isfinite(X_train).all(), "X_train contains non-finite values"
         assert np.isfinite(y_train).all(), "y_train contains non-finite values"
 
         dataset = TensorDataset(
@@ -193,6 +192,11 @@ def fit_predict_mlp(X_train, y_train, X_test):
 
     X_train_scaled = scaler.fit_transform(X_train_imp)
     X_test_scaled = scaler.transform(X_test_imp)
+
+    assert np.isfinite(X_train_scaled).all(
+    ), "X_train_scaled contains non-finite values"
+    assert np.isfinite(X_test_scaled).all(
+    ), "X_test_scaled contains non-finite values"
 
     input_dim = X_train_scaled.shape[1]
     model = MLPClassifierWrapper(input_dim=input_dim)
