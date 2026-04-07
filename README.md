@@ -127,9 +127,8 @@ and neural baselines — particularly relevant given class imbalance in the data
 
 ![Calibration Curves](images/Calibration_curve.png)
 
-*TabICL, EBM, and XGBoost track the perfect calibration diagonal closely in the low-to-mid 
-probability range. Logistic Regression shows systematic overconfidence at higher predicted 
-probabilities, diverging significantly from the diagonal above 0.4.*
+* *TabICL, EBM, and XGBoost track the perfect calibration diagonal closely in the low-to-mid probability range.*
+* *Logistic Regression diverges from the calibration diagonal above a predicted probability of ~0.4, a pattern consistent with score compression in linearly-separable-assumption models when the true decision boundary is non-linear — resulting in systematic underestimation of high-risk instances.*
 
 ### 5. Data Availability
 * Due to data governance constraints of the MIMIC-IV database, raw data cannot be shared in this repository.
